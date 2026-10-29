@@ -6,9 +6,15 @@ import {
   LoaderCircle,
   Moon,
   ShieldCheck,
+  Skull,
 } from "lucide-react";
 import Link from "next/link";
 import CupidonAction from "./cupidon-action";
+import WolfVoteAction from "./wolf-vote-action";
+import WitchAction from "./witch-action";
+import SeerAction from "./seer-action";
+import HunterAction from "./hunter-action";
+import VillageVoteAction from "./village-vote-action";
 
 type PlayerRole = {
   key: string;
@@ -32,6 +38,7 @@ type JoinState = {
     registrationStatus: string;
     lifeStatus: string;
     role?: PlayerRole | null;
+    currentVoteTargetId?: string | null;
   } | null;
   eligibleTargets?: PlayerTarget[];
 };
@@ -176,6 +183,31 @@ export default function JoinGameForm({
     state?.player?.lifeStatus !== "dead" &&
     state?.game.status === "cupidon_selection";
 
+  // 🐺 Un loup peut voter s'il est approuvé, vivant, loup-garou,
+  //    et que la partie est en phase de vote nocturne.
+  const wolfCanVote =
+    state?.player?.registrationStatus === "approved" &&
+    state?.player?.role?.key === "loup_garou" &&
+    state?.player?.lifeStatus !== "dead" &&
+    state?.game.status === "night_wolf_vote";
+  
+  const SeerCanAct =
+    state?.player?.registrationStatus === "approved" &&
+    state?.player?.role?.key === "voyante" &&
+    state?.player?.lifeStatus !== "dead" &&
+    state?.game.status === "night_seer_action";
+  
+  const WitchCanAct =
+    state?.player?.registrationStatus === "approved" &&
+    state?.player?.role?.key === "sorciere" &&
+    state?.player?.lifeStatus !== "dead" &&
+    state?.game.status === "night_witch_action";
+  
+  const HunterCanAct =
+    state?.player?.registrationStatus === "approved" &&
+    state?.player?.role?.key === "chasseur" &&
+    state?.game.status === "hunter_action";
+
   return (
     <main className="auth-page join-page">
       <section className="auth-card">
@@ -268,7 +300,8 @@ export default function JoinGameForm({
                         {/* Astuce : masquée quand Cupidon peut agir
                             (le panneau d'action explique déjà) */}
                         {roleTips[state.player.role.key] &&
-                          !cupidonCanAct && (
+                          !cupidonCanAct &&
+                          !wolfCanVote && (
                             <div className="player-role-tip mt-2">
                               <span>
                                 {roleTips[state.player.role.key]}
@@ -276,13 +309,23 @@ export default function JoinGameForm({
                             </div>
                           )}
 
-                        <div className="player-role-status">
-                          <CheckCircle2 size={17} />
-                          <span>
-                            {state.player.lifeStatus === "dead"
-                              ? "Tu as été éliminé."
-                              : "Tu es en vie."}
-                          </span>
+                        <div 
+                          className={`player-role-status ${
+                            state.player.lifeStatus === "dead"
+                              ? "player-role-status--dead"
+                              : ""
+                          }`}
+                        >
+                          {state.player.lifeStatus === "dead"
+                            ? <>
+                              <Skull size={17} />
+                              <span> Tu as été éliminé. </span>
+                            </>
+                            : <>
+                              <ShieldCheck size={17} />
+                              <span> Tu es en vie. </span>
+                            </>
+                          }
                         </div>
                       </section>
 
@@ -298,6 +341,54 @@ export default function JoinGameForm({
                           )}
                           onCompleted={loadStatus}
                         />
+                      )}
+
+                      {/* 🐺 Action Loups (uniquement en phase night_wolf_vote) */}
+                      {wolfCanVote && (
+                        <WolfVoteAction
+                          code={initialCode}
+                          targets={(state.eligibleTargets ?? []).map((target) => ({
+                            id: target.id,
+                            displayName: target.display_name,
+                          }))}  
+                          currentTargetId={state.player?.currentVoteTargetId ?? null}
+                          onCompleted={loadStatus}
+                        />
+                      )}
+
+                      {/* 🧙 Action Sorcière (uniquement en phase night_witch_action) */}
+                      {WitchCanAct && (
+                        <WitchAction
+                          code={initialCode}
+                          onCompleted={loadStatus}
+                        />
+                      )}
+
+                      {/* 🔮 Action Voyante (uniquement en phase night_seer_action) */}
+                      {SeerCanAct && (
+                        <SeerAction
+                          code={initialCode}
+                          onCompleted={loadStatus}
+                        />
+                      )}
+
+                      {/* 🔫 Action Chasseur (uniquement en phase hunter_action) */}
+                      {HunterCanAct && (
+                        <HunterAction
+                          code={initialCode}
+                          onCompleted={loadStatus}
+                        />
+                      )}
+
+                      {/* 🗳️ Scrutin du village (uniquement en phase village_vote_1 ou village_vote_2) */}
+                      {state.player.registrationStatus === "approved" &&
+                        state.player.lifeStatus === "alive" &&
+                        (state.game.status === "village_vote_1" ||
+                          state.game.status === "village_vote_2") && (
+                          <VillageVoteAction
+                            code={initialCode}
+                            onCompleted={loadStatus}
+                          />
                       )}
                     </>
                   )}

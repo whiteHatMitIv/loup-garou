@@ -1,3 +1,4 @@
+
 import { Suspense } from "react";
 import { connection } from "next/server";
 import { notFound, redirect } from "next/navigation";
@@ -6,7 +7,14 @@ import { ArrowLeft, Moon, ShieldCheck } from "lucide-react";
 
 import { getMasterUser } from "@/lib/auth/require-master";
 import { createAdminClient } from "@/lib/supabase/admin";
+
 import RoleSetupForm from "./role-setup-form";
+import GameOverview from "./game-overview";
+import WolfVoteControl from "./wolf-vote-control";
+import NightResolutionControl from "./night-resolution-control";
+import VillageVoteControl from "./village-vote-control";
+import DayResolutionControl from "./day-resolution-control";
+import ShareSummaryButton from "./share-summary-button";
 
 const statusLabels: Record<string, string> = {
   lobby: "Inscriptions ouvertes",
@@ -16,12 +24,14 @@ const statusLabels: Record<string, string> = {
   night_witch_action: "Nuit — Sorcière",
   night_seer_action: "Nuit — Voyante",
   night_resolution: "Résolution de la nuit",
+  hunter_action: "Le Chasseur choisit sa cible",
   day_discussion: "Débat du village",
   village_vote_1: "Premier scrutin",
   village_vote_2: "Second scrutin",
   day_resolution: "Résolution du vote",
   paused: "En pause",
   game_over: "Terminée",
+  finished: "Terminée",
 };
 
 export default function GameSetupPage({
@@ -47,7 +57,7 @@ async function GameSetupContent({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  // Cette page dépend de la session et des données actuelles.
+  // La page utilise la session et les données actuelles.
   await connection();
 
   const { id } = await params;
@@ -69,7 +79,10 @@ async function GameSetupContent({
     .maybeSingle();
 
   if (gameError) {
-    console.error("Chargement de la partie impossible:", gameError.message);
+    console.error(
+      "Chargement de la partie impossible:",
+      gameError.message
+    );
     throw new Error("Impossible de charger la partie.");
   }
 
@@ -105,6 +118,48 @@ async function GameSetupContent({
 
   const inviteUrl = `/join/${game.invite_code}`;
   const isLobby = game.status === "lobby";
+  const isWolfVote = game.status === "night_wolf_vote";
+  const isNightResolution = game.status === "night_resolution";
+  const isVillageVote = [
+    "day_discussion",
+    "village_vote_1",
+    "village_vote_2",
+  ].includes(game.status);
+  const isDayResolution = game.status === "day_resolution";
+
+  let dayResolutionTarget: { id: string; displayName: string } | null = null;
+
+  if (isDayResolution) {
+    const { data: resolutionPhase } = await admin
+      .from("game_phases")
+      .select("metadata")
+      .eq("game_id", game.id)
+      .eq("phase_key", "day_resolution")
+      .eq("status", "open")
+      .order("phase_number", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    
+    const targetId = 
+      (resolutionPhase?.metadata as { targetPlayerId?: string } | null)
+        ?.targetPlayerId ?? null;
+
+    if (targetId) {
+      const { data: targetPlayer } = await admin
+        .from("game_players")
+        .select("id, display_name")
+        .eq("game_id", game.id)
+        .eq("id", targetId)
+        .maybeSingle();
+      
+      if (targetPlayer) {
+        dayResolutionTarget = {
+          id: targetPlayer.id,
+          displayName: targetPlayer.display_name,
+        };
+      }
+    }
+  }
 
   return (
     <main className="site-shell">
@@ -125,12 +180,14 @@ async function GameSetupContent({
       </header>
 
       <section className="container dashboard-main">
+        {/* En-tête de la partie */}
         <div className="game-detail-heading">
           <div>
             <p className="section-kicker">GESTION DE LA PARTIE</p>
             <h1 className="dashboard-title">{game.name}</h1>
             <p className="hero-description">
-              Configure les rôles et prépare le lancement de la partie.
+              Gère les joueurs, suis le déroulement de la partie
+              et consulte les scores.
             </p>
           </div>
 
@@ -139,6 +196,7 @@ async function GameSetupContent({
           </span>
         </div>
 
+        {/* Statistiques générales */}
         <div className="dashboard-stats">
           <article className="dashboard-stat-card">
             <div className="dashboard-stat-icon">
@@ -167,6 +225,13 @@ async function GameSetupContent({
           </article>
         </div>
 
+        {/* Liste des joueurs, statuts et classement */}
+        <GameOverview gameId={game.id} />
+        {["game_over", "finished"].includes(game.status) && (
+          <ShareSummaryButton gameId={game.id} />
+        )}
+
+        {/* Actions de gestion et invitation */}
         <div className="dashboard-content-grid game-detail-grid">
           {isLobby ? (
             <RoleSetupForm
@@ -174,28 +239,53 @@ async function GameSetupContent({
               gameName={game.name}
               approvedPlayers={approvedPlayers ?? 0}
             />
+          ) : isNightResolution ? (
+            <NightResolutionControl gameId={game.id} />
+          ) : isWolfVote ? (
+            <WolfVoteControl gameId={game.id} />
+          ) : isVillageVote ? (
+            <VillageVoteControl gameId={game.id} />
+          ) : isDayResolution ? (
+            <DayResolutionControl 
+              gameId={game.id}
+              target={dayResolutionTarget}
+            />
           ) : (
             <section className="dashboard-panel">
               <p className="section-kicker">PARTIE EN COURS</p>
-              <h2>La configuration initiale est terminée.</h2>
+              <h2>
+                {statusLabels[game.status] ?? game.status}
+              </h2>
+
               <p className="role-setup-description">
-                Statut actuel : {statusLabels[game.status] ?? game.status}.
-                La configuration des rôles ne peut plus être modifiée depuis
-                cet écran.
+                La partie est en cours. Les actions disponibles
+                dépendent de la phase actuelle.
               </p>
-              <p className="dashboard-muted">
-                La prochaine étape de notre développement permettra de gérer
-                les phases du jeu et les actions de chaque rôle.
-              </p>
+
+              {game.status === "cupidon_selection" && (
+                <p className="dashboard-muted">
+                  Cupidon doit choisir les deux amoureux depuis
+                  son interface de joueur.
+                </p>
+              )}
+
+              {game.status !== "cupidon_selection" && (
+                <p className="dashboard-muted">
+                  Les commandes des autres phases seront intégrées
+                  au fur et à mesure de la mise en place du moteur
+                  de jeu.
+                </p>
+              )}
             </section>
           )}
 
           <section className="dashboard-panel">
             <p className="section-kicker">INVITATION</p>
             <h2>Faire rejoindre les joueurs</h2>
+
             <p className="role-setup-description">
-              Partage ce lien dans ton groupe WhatsApp. Les joueurs devront
-              soumettre leur prénom, puis attendre ta validation.
+              Partage ce lien dans ton groupe WhatsApp. Les joueurs
+              soumettent leur prénom et attendent ta validation.
             </p>
 
             <div className="join-code-display">
@@ -203,13 +293,16 @@ async function GameSetupContent({
               <strong>{game.invite_code}</strong>
             </div>
 
-            <Link href={inviteUrl} className="btn btn-secondary game-preview-link">
+            <Link
+              href={inviteUrl}
+              className="btn btn-secondary game-preview-link"
+            >
               Ouvrir le formulaire d&apos;inscription
             </Link>
 
             <p className="dashboard-muted">
-              Ce lien est relatif à l&apos;application. Après le déploiement,
-              tu pourras partager le lien public complet dans WhatsApp.
+              Après le déploiement, partage le lien public complet
+              pour que les joueurs puissent accéder à l&apos;application.
             </p>
           </section>
         </div>

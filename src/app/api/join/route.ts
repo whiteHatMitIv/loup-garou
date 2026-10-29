@@ -85,6 +85,7 @@ export async function GET(request: Request) {
     }
 
     let eligibleTargets: { id: string; display_name: string }[] = [];
+    let currentWolfVoteTargetId: string | null = null;
 
     const cookieStore = await cookies();
     const cookieName = playerCookieName(code);
@@ -102,6 +103,7 @@ export async function GET(request: Request) {
       registrationStatus: string;
       lifeStatus: string;
       role: PlayerRole | null;
+      currentVoteTargetId?: string | null;
     };
 
     let player: PlayerInfo | null = null;
@@ -228,6 +230,120 @@ export async function GET(request: Request) {
                 display_name: t.display_name,
               }));
             }
+
+            if (
+              role?.key == "loup_garou" &&
+              game.status === "night_wolf_vote"
+            ) {
+              const { data: alivePlayers, error: alivePlayersError } = await admin
+                .from("game_players")
+                .select("id, display_name, normalized_name")
+                .eq("game_id", game.id)
+                .eq("registration_status", "approved")
+                .eq("life_status", "alive")
+
+              if (alivePlayersError) {
+                console.error(
+                  "Chargement des cibles des Loups impossible:",
+                  alivePlayersError.message
+                );
+
+                return jsonResponse(
+                  { error: "Impossible de charger les joueurs disponibles." },
+                  500                 
+                )
+              }
+
+              const alivePlayersIds = (alivePlayers ?? []).map((p) => p.id);
+              const wolfIds = new Set<string>();
+
+              if (alivePlayersIds.length > 0) {
+                const { data: roleAssigments, error: assignmentsError } = await admin
+                  .from("player_roles")
+                  .select("player_id")
+                  .eq("game_id", game.id)
+                  .eq("role_key", "loup_garou")
+                  .in("player_id", alivePlayersIds);
+                
+                if (assignmentsError) {
+                  console.error(
+                    "Chargement des rôles des Loups impossible:",
+                    assignmentsError.message
+                  );
+
+                  return jsonResponse(
+                    { error: "Impossible de charger les rôles des joueurs." },
+                    500
+                  );
+                }
+
+                for (const assignment of roleAssigments ?? []) {
+                  wolfIds.add(assignment.player_id);
+                }
+              }
+
+              eligibleTargets = (alivePlayers ?? [])
+                .filter(
+                  (target) =>
+                  target.id !== existingPlayer.id &&
+                  !wolfIds.has(target.id)
+                )
+                .map((target) => ({
+                  id: target.id,
+                  display_name: target.display_name,
+                }))
+                .sort((a, b) => 
+                  a.display_name.localeCompare(b.display_name, "fr", {
+                    sensitivity: "base",
+                  })
+                )
+              
+              const { data: wolfPhase, error: wolfPhaseError } = await admin
+                .from("game_phases")
+                .select("id")
+                .eq("game_id", game.id)
+                .eq("phase_key", "night_wolf_vote")
+                .eq("status", "open")
+                .order("phase_number", { ascending: false })
+                .limit(1)
+                .maybeSingle();
+
+              if (wolfPhaseError) {
+                console.error(
+                  "Chargement de la phase de vote des Loups impossible:",
+                  wolfPhaseError.message
+                );
+
+                return jsonResponse(
+                  { error: "Impossible de charger la phase de vote des Loups." },
+                  500
+                );
+              }
+
+              if (wolfPhase) {
+                const { data: existingVote, error: existingVoteError } = await admin
+                  .from("votes")
+                  .select("target_player_id")
+                  .eq("game_id", game.id)
+                  .eq("phase_id", wolfPhase.id)
+                  .eq("voter_player_id", existingPlayer.id)
+                  .eq("vote_kind", "wolves")
+                  .maybeSingle();
+                
+                if (existingVoteError) {
+                  console.error(
+                    "Chargement du vote actuel impossible:",
+                    existingVoteError.message
+                  );
+                  return jsonResponse(
+                    { error: "Impossible de récupérer ton vote." },
+                    500
+                  );
+                }
+
+                currentWolfVoteTargetId = existingVote?.target_player_id ?? null;
+              }
+            }
           }
 
           player = {
@@ -235,6 +351,7 @@ export async function GET(request: Request) {
             registrationStatus: existingPlayer.registration_status,
             lifeStatus: existingPlayer.life_status,
             role,
+            currentVoteTargetId: currentWolfVoteTargetId
           };
         }
       }
