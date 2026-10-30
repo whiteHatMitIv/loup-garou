@@ -1,12 +1,23 @@
-
 "use client";
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { Crosshair, Target } from "lucide-react";
+import { Crosshair, LoaderCircle, Target } from "lucide-react";
 
 type HunterTarget = {
   id: string;
   displayName: string;
+};
+
+type HunterShotResult = {
+  success?: boolean;
+  message?: string;
+  error?: string;
+  result?: {
+    game_status?: string;
+    winner?: string | null;
+    requires_hunter_action?: boolean;
+    hunter_target_player_id?: string;
+  };
 };
 
 type Props = {
@@ -22,6 +33,22 @@ export default function HunterAction({ code, onCompleted }: Props) {
   const [finished, setFinished] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+
+  // ─────────────────────────────────────────────────────────────
+  // Après un tir réussi, on rafraîchit automatiquement la partie.
+  // On n'utilise AUCUN state intermédiaire ici : `finished` passe
+  // une seule fois à `true`, donc l'effet s'exécute exactement une
+  // fois, et le timer n'est annulé qu'au démontage du composant.
+  // ─────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!finished) return;
+
+    const timer = setTimeout(() => {
+      void onCompleted();
+    }, 1200);
+
+    return () => clearTimeout(timer);
+  }, [finished, onCompleted]);
 
   const loadTargets = useCallback(async () => {
     setLoading(true);
@@ -88,7 +115,7 @@ export default function HunterAction({ code, onCompleted }: Props) {
         }),
       });
 
-      const data = await response.json();
+      const data = (await response.json()) as HunterShotResult;
 
       if (!response.ok) {
         throw new Error(data.error ?? "Impossible d'enregistrer le tir.");
@@ -96,7 +123,9 @@ export default function HunterAction({ code, onCompleted }: Props) {
 
       setFinished(true);
       setMessage(
-        data.message ?? "Ton action a été enregistrée."
+        data.result?.game_status === "game_over"
+          ? "Ton tir a mis fin à la partie. Le bilan s'affiche dans un instant."
+          : data.message ?? "Ton action a été enregistrée."
       );
     } catch (err) {
       setError(
@@ -112,7 +141,10 @@ export default function HunterAction({ code, onCompleted }: Props) {
   if (loading) {
     return (
       <section className="dashboard-panel hunter-action">
-        <p>Chargement des cibles disponibles…</p>
+        <p>
+          <LoaderCircle className="auth-spinner" size={15} /> Chargement des
+          cibles disponibles…
+        </p>
       </section>
     );
   }
@@ -122,16 +154,15 @@ export default function HunterAction({ code, onCompleted }: Props) {
       <section className="dashboard-panel hunter-action">
         <p className="section-kicker">POUVOIR DU CHASSEUR</p>
         <h2>Ton tir a été résolu</h2>
+
         <p className="hunter-action-success" role="status">
           {message}
         </p>
-        <button
-          type="button"
-          className="btn btn-primary hunter-action-submit"
-          onClick={() => void onCompleted()}
-        >
-          Actualiser la partie
-        </button>
+
+        <p className="dashboard-muted">
+          <LoaderCircle className="auth-spinner" size={15} /> La suite de la
+          partie se charge automatiquement…
+        </p>
       </section>
     );
   }
@@ -146,9 +177,9 @@ export default function HunterAction({ code, onCompleted }: Props) {
       </h2>
 
       <p className="role-setup-description">
-        Tu peux désigner un joueur vivant. Il sera éliminé,
-        et si cette cible est amoureuse d&apos;un autre joueur vivant,
-        son partenaire sera également éliminé.
+        Tu peux désigner un joueur vivant. Il sera éliminé, et si cette cible
+        est amoureuse d&apos;un autre joueur vivant, son partenaire sera
+        également éliminé.
       </p>
 
       {targets.length === 0 ? (
@@ -157,10 +188,7 @@ export default function HunterAction({ code, onCompleted }: Props) {
         </p>
       ) : (
         <form onSubmit={submitShot}>
-          <label
-            className="hunter-target-label"
-            htmlFor="hunter-target"
-          >
+          <label className="hunter-target-label" htmlFor="hunter-target">
             <Target size={17} />
             Choisir un joueur
           </label>
@@ -197,8 +225,8 @@ export default function HunterAction({ code, onCompleted }: Props) {
       )}
 
       <p className="dashboard-muted">
-        Ta cible ne peut pas être sauvée par la potion de vie :
-        cette décision intervient après les actions de la Sorcière.
+        Ta cible ne peut pas être sauvée par la potion de vie : cette décision
+        intervient après les actions de la Sorcière.
       </p>
     </section>
   );

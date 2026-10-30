@@ -8,6 +8,7 @@ import {
   Moon,
   ShieldCheck,
   Skull,
+  Trophy,
 } from "lucide-react";
 import Link from "next/link";
 import CupidonAction from "./cupidon-action";
@@ -43,6 +44,20 @@ type JoinState = {
     currentVoteTargetId?: string | null;
   } | null;
   eligibleTargets?: PlayerTarget[];
+  gameOver?: {
+    winner: "village" | "loups";
+    yourCamp: "village" | "loups" | null;
+    didWin: boolean | null;
+    ranking: Array<{
+      id: string;
+      displayName: string;
+      role: string;
+      camp: string;
+      points: number;
+      lifeStatus: string;
+      rank: number;
+    }>
+  } | null;
 };
 
 type ApiResult = JoinState & {
@@ -308,6 +323,64 @@ export default function JoinGameForm({
                         </div>
                       </div>
 
+                      {state.game.status === "game_over" && state.gameOver && (
+                        <section
+                          className={`player-role-card mt-5 ${
+                              state.gameOver.didWin
+                                ? "border-[#8ce0b1]"
+                                : "border-[#ff8a8a]"
+                            }`}
+                        >
+                          <p className="section-kicker">FIN DE LA PARTIE</p>
+
+                          <h2>
+                            {state.gameOver.didWin === true
+                              ? <>
+                                <Trophy />
+                                <span>Victoire</span>
+                              </>
+                              : <>
+                                <Skull />
+                                <span>Defaite</span>
+                              </>}
+                          </h2>
+
+                          <p className="dashboard-muted mt-2">
+                            Camp vaiqueur: {" "}
+                            <strong>
+                              {state.gameOver.winner === "village"
+                                ? "Le Village"
+                                : "Les Loups-Garous"
+                              }
+                            </strong>
+                          </p>
+
+                          <div className={`wolf-vote-tally mt-6`}>
+                              <h3>Classement final</h3>
+
+                              {state.gameOver.ranking.map((player) => (
+                                <div
+                                  key={player.id}
+                                  className={`wolf-vote-target ${player.id === state.player?.displayName ? "" : "font-normal"}`}
+                                >
+                                  <span>
+                                    {player.rank}. {player.displayName} - {player.role}
+                                    {player.lifeStatus === "dead"
+                                      ? <Skull/>
+                                      : ""
+                                    }
+                                  </span>
+                                  <strong>{player.points} pts</strong>
+                                </div>
+                              ))}
+                          </div>
+
+                          <p>
+                            Merci d&apos;avoir participé à cette partie !
+                          </p>
+                        </section>
+                      )}
+
                       <section className="player-role-card">
                         <div className="player-role-heading">
                           <span className="section-kicker">
@@ -334,7 +407,8 @@ export default function JoinGameForm({
                             (le panneau d'action explique déjà) */}
                         {roleTips[state.player.role.key] &&
                           !cupidonCanAct &&
-                          !wolfCanVote && (
+                          !wolfCanVote &&
+                          state.game.status !== "game_over" && (
                             <div className="player-role-tip mt-2">
                               <span>
                                 {roleTips[state.player.role.key]}

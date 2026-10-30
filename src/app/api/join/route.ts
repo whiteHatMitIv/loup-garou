@@ -64,7 +64,7 @@ export async function GET(request: Request) {
 
     const { data: game, error: gameError } = await admin
       .from("games")
-      .select("id, name, status")
+      .select("id, name, status, winner")
       .eq("invite_code", code)
       .maybeSingle();
 
@@ -357,6 +357,100 @@ export async function GET(request: Request) {
       }
     }
 
+    let gameOver: {
+      winner: "village" | "loups" | null;
+      yourCamp: "village" | "loups" | null;
+      didWin: boolean | null;
+      ranking: Array<{
+        id: string;
+        displayName: string;
+        role: string;
+        camp: string;
+        points: number;
+        lifeStatus: string;
+        rank: number;
+      }>
+    } | null = null;
+
+    if (
+      game.status === "game_over" &&
+      game.winner &&
+      player?.registrationStatus === "approved"
+    ) {
+      const [playerRes, rolesRes, roleDefsRes, scoresRes] = 
+        await Promise.all([
+          admin
+            .from("game_players")
+            .select("id, display_name, life_status")
+            .eq("game_id", game.id)
+            .eq("registration_status", "approved"),
+          admin
+            .from("player_roles")
+            .select("player_id, role_key")
+            .eq("game_id", game.id),
+          admin.from("roles").select("role_key, display_name, camp"),
+          admin
+            .from("score_events")
+            .select("player_id, points")
+            .eq("game_id", game.id)
+        ]);
+      
+        if (
+          !playerRes.error &&
+          !rolesRes.error &&
+          !roleDefsRes.error &&
+          !scoresRes.error
+        ) {
+          const roleKeyByPlayer = new Map(
+            (rolesRes.data ?? []).map((r) => [r.player_id, r.role_key])
+          )
+          const roleDefByKey = new Map(
+            (roleDefsRes.data ?? []).map((r) => [r.role_key, r])
+          )
+          const pointsByPlayer = new Map<string, number>();
+
+          for (const event of scoresRes.data ?? []) {
+            pointsByPlayer.set(
+              event.player_id,
+              (pointsByPlayer.get(event.player_id) ?? 0) + event.points
+            );
+          }
+
+          const ranking = (playerRes.data ?? [])
+            .map((p) => {
+              const roleKey = roleKeyByPlayer.get(p.id);
+              const def = roleKey ? roleDefByKey.get(roleKey) : null;
+
+              return {
+                id: p.id,
+                displayName: p.display_name,
+                role: def?.display_name ?? "Inconnu",
+                camp: def?.camp ?? "inconnu",
+                lifeStatus: p.life_status ?? "not_started",
+                points: pointsByPlayer.get(p.id) ?? 0
+              };
+            })
+            .sort(
+              (a, b) =>
+                b.points - a.points ||
+                a.displayName.localeCompare(b.displayName, "fr")
+            )
+            .map((p, i) => ({ ...p, rank: i + 1 }));
+          
+          const yourCamp = 
+            player.role?.camp === "village" || player.role?.camp === "loups"
+              ? (player.role.camp as "village" | "loups")
+              : null;
+          
+          gameOver = {
+            winner: game.winner as "village" | "loups",
+            yourCamp,
+            didWin: yourCamp ? yourCamp === game.winner : null,
+            ranking
+          }
+        }
+    }
+
     const response = jsonResponse({
       game: {
         id: game.id,
@@ -365,6 +459,7 @@ export async function GET(request: Request) {
       },
       player,
       eligibleTargets,
+      gameOver
     });
 
     if (clearCookie) {
