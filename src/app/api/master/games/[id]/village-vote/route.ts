@@ -5,12 +5,13 @@ import { createAdminClient } from "@/lib/supabase/admin";
 
 type VoteRow = {
   voter_player_id: string;
-  target_player_id: string;
+  target_player_id: string | null;
 };
 
 type PlayerRow = {
   id: string;
   display_name: string;
+  life_status: string | null;
 };
 
 export async function GET(
@@ -49,7 +50,8 @@ export async function GET(
       .select("id, phase_key, status, metadata, phase_number")
       .eq("game_id", id)
       .in("phase_key", ["village_vote_1", "village_vote_2"])
-      .eq("status", "open")
+      .eq("day_number", Math.max(game.round_number, 1))
+      .in("status", ["open", "closed", "resolved"])
       .order("phase_number", { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -65,20 +67,22 @@ export async function GET(
 
     const { data: playerData, error: playersError } = await admin
       .from("game_players")
-      .select("id, display_name")
+      .select("id, display_name, life_status")
       .eq("game_id", id)
       .eq("registration_status", "approved")
-      .eq("life_status", "alive")
       .order("display_name", { ascending: true });
 
     if (playersError) {
       return NextResponse.json(
-        { error: "Impossible de charger les joueurs vivants." },
+        { error: "Impossible de charger les joueurs." },
         { status: 500 }
       );
     }
 
     const alivePlayers = (playerData ?? []) as PlayerRow[];
+    const alivePlayerCount = alivePlayers.filter(
+      (player) => player.life_status === "alive"
+    ).length;
     let votes: VoteRow[] = [];
 
     if (phase) {
@@ -104,6 +108,8 @@ export async function GET(
     const voteCounts = new Map<string, number>();
 
     for (const vote of votes) {
+      if (!vote.target_player_id) continue;
+
       voteCounts.set(
         vote.target_player_id,
         (voteCounts.get(vote.target_player_id) ?? 0) + 1
@@ -143,6 +149,19 @@ export async function GET(
           a.targetName.localeCompare(b.targetName, "fr")
       );
 
+    const voteDetails = votes
+      .map((vote) => ({
+        voterName:
+          playersById.get(vote.voter_player_id)?.display_name ??
+          "Joueur inconnu",
+        targetName: vote.target_player_id
+          ? playersById.get(vote.target_player_id)?.display_name ??
+            "Joueur inconnu"
+          : null,
+        voterPlayerId: vote.voter_player_id,
+      }))
+      .sort((a, b) => a.voterName.localeCompare(b.voterName, "fr"));
+
     return NextResponse.json({
       game: {
         id: game.id,
@@ -157,9 +176,10 @@ export async function GET(
             status: phase.status,
           }
         : null,
-      alivePlayers: alivePlayers.length,
+      alivePlayers: alivePlayerCount,
       totalVotes: votes.length,
       tally,
+      voteDetails,
     });
   } catch (error) {
     console.error("Erreur du dashboard de vote :", error);

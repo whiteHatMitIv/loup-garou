@@ -24,6 +24,11 @@ type VoteData = {
     targetName: string;
     votes: number;
   }[];
+  voteDetails: {
+    voterPlayerId: string;
+    voterName: string;
+    targetName: string | null;
+  }[];
 };
 
 type ApiResult = {
@@ -186,6 +191,29 @@ export default function VillageVoteControl({
           ))
         ) : (
           <p className="dashboard-muted">Aucun vote pour le moment.</p>
+        )}
+      </div>
+
+      <div className="village-vote-details">
+        <h3>Qui a voté qui ?</h3>
+
+        {loading ? (
+          <p className="dashboard-muted">Chargement des votes…</p>
+        ) : data?.voteDetails.length ? (
+          <div className="village-vote-details-list">
+            {data.voteDetails.map((vote) => (
+              <div
+                className="village-vote-detail"
+                key={vote.voterPlayerId}
+              >
+                <strong>{vote.voterName}</strong>
+                <span aria-hidden="true">→</span>
+                <span>{vote.targetName ?? "Aucun joueur"}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="dashboard-muted">Aucun vote enregistré pour le moment.</p>
         )}
       </div>
 
