@@ -359,6 +359,7 @@ export async function GET(request: Request) {
 
     const response = jsonResponse({
       game: {
+        id: game.id,
         name: game.name,
         status: game.status,
       },
@@ -496,6 +497,7 @@ export async function POST(request: Request) {
     const response = jsonResponse(
       {
         game: {
+          id: game.id,
           name: game.name,
           status: game.status,
         },

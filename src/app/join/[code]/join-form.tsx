@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
+import { createClient } from "@/lib/supabase/client";
 import {
   CheckCircle2,
   LoaderCircle,
@@ -30,6 +31,7 @@ type PlayerTarget = {
 
 type JoinState = {
   game: {
+    id: string;
     name: string;
     status: string;
   };
@@ -131,6 +133,37 @@ export default function JoinGameForm({
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadStatus();
   }, [loadStatus]);
+
+  useEffect(() => {
+    const gameId = state?.game.id;
+
+    if (!gameId) return;
+
+    const supabase = createClient();
+    const channel = supabase
+      .channel(`game-phase:${gameId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "game_phase_notifications",
+          filter: `game_id=eq.${gameId}`,
+        },
+        () => {
+          void loadStatus();
+        }
+      )
+      .subscribe((status) => {
+        if (status === "SUBSCRIBED") {
+          void loadStatus();
+        }
+      });
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [loadStatus, state?.game.id]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
