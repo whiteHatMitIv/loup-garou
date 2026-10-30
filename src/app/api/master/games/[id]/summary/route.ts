@@ -236,7 +236,7 @@ export async function GET(
     const winnerLabel =
       game.winner === "village"
         ? "Le Village"
-        : game.winner === "wolves"
+        : game.winner === "loups"
           ? "Les Loups-Garous"
           : game.winner ?? "Non déterminé";
 
